@@ -6,98 +6,9 @@ TOKEN = "7996519892:AAGl1jJS5pbOmJCBiJDiyYmhWqEmRn6ixmM"
 ADMIN_GROUP_ID = -1002593269045
 
 bot = telebot.TeleBot(TOKEN)
-
 users = {}
 
-def get_username_or_id(user):
-    return f"@{user.username}" if user.username else f"ID: {user.id}"
-
-# Клавиатура для пользователей
-def main_keyboard():
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(types.KeyboardButton("Активировать бота"))
-    kb.add(types.KeyboardButton("Оплатил(а)"))
-    return kb
-
-# Клавиатура для админов - подтверждение оплаты
-def payment_confirm_keyboard(user_id):
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"confirm_{user_id}"))
-    return kb
-
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    user_id = message.from_user.id
-    user_name = get_username_or_id(message.from_user)
-    now = datetime.now()
-
-    if user_id not in users:
-        users[user_id] = {
-            "start_date": now,
-            "paid": False
-        }
-        welcome_text = (
-            f"👋 Привет, {user_name}!\n\n"
-            "Добро пожаловать в ChatSaver Bot — твой надёжный помощник для сохранения удалённых сообщений и самоудаляющихся медиа.\n\n"
-            "🎁 Тебе доступна *бесплатная неделя* использования бота.\n\n"
-            "Чтобы начать, нажми кнопку ниже и следуй инструкции.\n"
-        )
-        bot.send_message(user_id, welcome_text, parse_mode='Markdown', reply_markup=main_keyboard())
-    else:
-        bot.send_message(user_id, "✅ Ты уже активировал бота! Используй меню ниже.", reply_markup=main_keyboard())
-
-@bot.message_handler(func=lambda m: m.text == "Активировать бота")
-def send_activation_info(message):
-    text = (
-        "🚀 *Инструкция по активации ChatSaver Bot*\n\n"
-        "1️⃣ Нажми кнопку «Оплатил(а)» после оплаты подписки — 99₽ в месяц.\n"
-        "2️⃣ Админ получит уведомление и подтвердит твою оплату.\n"
-        "3️⃣ После подтверждения бот активируется и начнёт сохранять удалённые сообщения, фото, видео и голосовые.\n\n"
-        "🆓 Бесплатный период — 7 дней! После этого нужно оплачивать подписку.\n\n"
-        "Если возникнут вопросы — пиши сюда, мы всегда поможем! 😊"
-    )
-    bot.send_message(message.from_user.id, text, parse_mode='Markdown')
-
-@bot.message_handler(func=lambda m: m.text.lower() in ["оплатил", "оплатил(а)"])
-def handle_paid(message):
-    user = message.from_user
-    user_id = user.id
-    user_name = get_username_or_id(user)
-    now = datetime.now()
-
-    # Отправляем уведомление в админ-группу с кнопкой подтверждения оплаты
-    msg_text = (
-        f"💸 *Пользователь оплатил подписку!*\n\n"
-        f"👤 Пользователь: {user_name}\n"
-        f"🆔 ID: {user_id}\n"
-        f"⏰ Время: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"💰 Сумма: 99₽"
-    )
-    bot.send_message(ADMIN_GROUP_ID, msg_text, parse_mode='Markdown', reply_markup=payment_confirm_keyboard(user_id))
-    bot.reply_to(message, "⌛ Ожидай подтверждения от админа. Спасибо за оплату!")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_"))
-def confirm_payment(call):
-    if call.message.chat.id != ADMIN_GROUP_ID:
-        bot.answer_callback_query(call.id, "⚠️ Эта кнопка только для админов.")
-        return
-
-    user_id_str = call.data.split("_")[1]
-    try:
-        user_id = int(user_id_str)
-    except:
-        bot.answer_callback_query(call.id, "⚠️ Неверный ID пользователя.")
-        return
-
-    if user_id in users:
-        users[user_id]["paid"] = True
-        bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
-        bot.send_message(user_id, "✅ Ваша подписка активирована! Теперь бот работает без ограничений.")
-        bot.send_message(ADMIN_GROUP_ID, f"🔓 Пользователь {user_id} успешно активирован.")
-        bot.answer_callback_query(call.id, "Подписка подтверждена и активирована.")
-    else:
-        bot.answer_callback_query(call.id, "⚠️ Пользователь не найден.")
-
+# 📌 Проверка доступа
 def has_access(user_id):
     user = users.get(user_id)
     if not user:
@@ -106,6 +17,106 @@ def has_access(user_id):
         return True
     return (datetime.now() - user["start_date"]) < timedelta(days=7)
 
-# Здесь добавляйте логику сохранения удалённых сообщений и прочее
+# 📍 /start
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    now = datetime.now()
 
-bot.infinity_polling()
+    if user_id not in users:
+        users[user_id] = {"start_date": now, "paid": False}
+
+    name = f"@{username}" if username else f"ID: {user_id}"
+
+    welcome_text = f"""👋 Привет, {name}!
+
+Добро пожаловать в *ChatSaver Bot* — твой личный помощник для сохранения:
+
+📥 Удалённых сообщений  
+📸 Самоудаляющихся фото, видео и голосовых  
+🗑️ Чатов, даже если они удалены у всех
+
+🆓 Тебе доступна *бесплатная неделя* использования!  
+После 7 дней потребуется оформить подписку — *99₽ в месяц*.
+
+💳 Для оплаты: *+7 932 222 99 30 (Ozon Bank)*  
+После перевода нажми кнопку *Оплатил(а)* (будет доступна после пробного периода).
+
+Если возникнут вопросы — пиши сюда.  
+Приятного использования! 🤖"""
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🚀 Активировать бота", callback_data="activate_bot"))
+    bot.send_message(user_id, welcome_text, reply_markup=markup, parse_mode='Markdown')
+
+# ▶️ Инструкция
+@bot.callback_query_handler(func=lambda call: call.data == "activate_bot")
+def send_instructions(call):
+    user_id = call.from_user.id
+    instructions = """🔧 *Как работает бот:*
+
+1️⃣ Просто добавь бота в свой чат  
+2️⃣ Дай ему права администратора  
+3️⃣ Готово — он начнёт сохранять удалённые сообщения и медиа!
+
+📅 Первые 7 дней бесплатно  
+🕒 После — подписка за 99₽ в месяц
+
+При удалении сообщений после пробного периода ты получишь уведомление с кнопкой 👀 *Посмотреть* — нажав на неё, появятся реквизиты для оплаты.
+"""
+    bot.edit_message_text(chat_id=user_id, message_id=call.message.message_id, text=instructions, parse_mode='Markdown')
+
+# 🧾 Обработка "Оплатил(а)"
+@bot.message_handler(func=lambda m: m.text.lower() in ["оплатил", "оплатил(а)"])
+def handle_paid(message):
+    user_id = message.from_user.id
+    username = message.from_user.username or f"ID: {user_id}"
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    msg = f"""💸 *Пользователь сообщил об оплате!*
+
+👤 {username}  
+🆔 {user_id}  
+⏰ {now}  
+💰 Сумма: 99₽"""
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_{user_id}"))
+    bot.send_message(ADMIN_GROUP_ID, msg, reply_markup=markup, parse_mode='Markdown')
+    bot.reply_to(message, "⌛ Ожидай подтверждения от админа...")
+
+# ✅ Подтверждение админом
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_"))
+def confirm_payment(call):
+    if call.message.chat.id != ADMIN_GROUP_ID:
+        return
+
+    user_id = int(call.data.split("_")[1])
+    users[user_id]["paid"] = True
+    bot.send_message(user_id, "✅ Подписка активирована! Спасибо за оплату 🎉")
+    bot.send_message(ADMIN_GROUP_ID, f"🔓 Пользователь {user_id} активирован.")
+
+# 📦 Обработка удаления сообщений после окончания пробного
+@bot.message_handler(func=lambda m: not has_access(m.from_user.id))
+def restricted_content(message):
+    user_id = message.from_user.id
+    if (datetime.now() - users[user_id]["start_date"]) >= timedelta(days=7):
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("👀 Посмотреть", callback_data="show_payment_info"))
+        bot.send_message(user_id, "❗ Кто-то что-то удалил...\nНо это скрыто, так как пробный период закончился.", reply_markup=markup)
+
+# 💳 Реквизиты
+@bot.callback_query_handler(func=lambda call: call.data == "show_payment_info")
+def show_payment_info(call):
+    user_id = call.from_user.id
+    payment_info = """💳 *Оплата подписки*
+
+Переведи *99₽* на номер:  
+📱 +7 932 222 99 30  
+🏦 Ozon Bank
+
+После перевода отправь сообщение: *Оплатил(а)*"""
+    bot.send_message(user_id, payment_info, parse_mode='Markdown')
+
+bot.polling()
