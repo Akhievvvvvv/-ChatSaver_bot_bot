@@ -1,0 +1,4 @@
+API_TOKEN = '7996519892:AAGl1jJS5pbOmJCBiJDiyYmhWqEmRn6ixmM'
+FREE_DAYS = 7
+PRICE_RUB = 99
+ADMIN_GROUP_ID = -1002593269045  # сюда отправлять уведомления
