@@ -1,30 +1,32 @@
 import telebot
-from telebot import types
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 
 TOKEN = "7996519892:AAGl1jJS5pbOmJCBiJDiyYmhWqEmRn6ixmM"
 ADMIN_GROUP_ID = -1002593269045
+PAYMENT_REQUISITES = "Оплата на номер: 89322229930 (Ozon bank)\nСумма: 99₽ в месяц"
 
 bot = telebot.TeleBot(TOKEN)
 
-# Хранилище пользователей
+# Хранилище пользователей (лучше потом заменить на БД)
 users = {}
 
-# Создаём главное меню с кнопками
-def main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    btn1 = types.KeyboardButton("📖 Инструкция")
-    btn2 = types.KeyboardButton("💳 Оплатил(а)")
-    btn3 = types.KeyboardButton("📊 Мой статус")
-    btn4 = types.KeyboardButton("❓ Помощь")
-    markup.add(btn1, btn2, btn3, btn4)
-    return markup
+def get_username_or_id(user):
+    if user.username:
+        return f"@{user.username}"
+    return str(user.id)
 
-# Обработка команды /start
+# Кнопка для подтверждения оплаты
+def admin_confirm_button(user_id):
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"confirm_{user_id}"))
+    return keyboard
+
+# Команда /start
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     user_id = message.from_user.id
-    user_name = message.from_user.first_name or "друг"
+    username = get_username_or_id(message.from_user)
     now = datetime.now()
 
     if user_id not in users:
@@ -32,97 +34,68 @@ def handle_start(message):
             "start_date": now,
             "paid": False
         }
+        text = (
+            f"👋 Привет, {username}!\n\n"
+            "Добро пожаловать в *ChatSaver Bot* — твой помощник для сохранения удалённых сообщений, самоудаляющихся медиа и всего чата.\n\n"
+            "🚀 *Что бот умеет?*\n"
+            "- Сохраняет удалённые сообщения 📥\n"
+            "- Сохраняет самоудаляющиеся фото, видео и голосовые 📸\n"
+            "- Сохраняет чат, даже если он удалён у всех 🗑️\n\n"
+            "🆓 Тебе доступна *бесплатная неделя* использования!\n"
+            "После 7 дней потребуется оформить подписку за 99₽ в месяц.\n\n"
+            "💳 Чтобы оплатить, отправь сообщение с текстом: *Оплатил(а)*\n"
+            "После оплаты администратор проверит и активирует доступ.\n\n"
+            "Если возникнут вопросы — пиши сюда.\n\n"
+            "Приятного использования! 🤖"
+        )
+        bot.send_message(user_id, text, parse_mode='Markdown')
+    else:
+        bot.send_message(user_id, "✅ Ты уже активировал бота!")
 
-    welcome_text = (
-        f"👋 Привет, *{user_name}*!\n\n"
-        "Я — *ChatSaver Bot* 🤖\n"
-        "⚡️ Я сохраняю удалённые сообщения и самоудаляющиеся медиа.\n\n"
-        "🆓 У тебя есть *бесплатная неделя* использования.\n"
-        "💳 Чтобы продолжить после — оформи подписку за *99₽* в месяц.\n\n"
-        "Ниже доступно меню для управления ботом."
-    )
-    bot.send_message(user_id, welcome_text, parse_mode="Markdown", reply_markup=main_menu())
-
-# Кнопка Инструкция
-@bot.message_handler(func=lambda m: m.text == "📖 Инструкция")
-def send_instructions(message):
-    instructions = (
-        "📚 *Инструкция по использованию ChatSaver Bot:*\n\n"
-        "1️⃣ Добавь меня в свои чаты или пиши лично.\n"
-        "2️⃣ Я автоматически сохраню удалённые сообщения и медиа.\n"
-        "3️⃣ Чтобы продолжить использовать после бесплатной недели — оформи подписку.\n"
-        "4️⃣ Для оформления нажми кнопку *Оплатил(а)* и оплати 99₽.\n"
-        "5️⃣ Админ подтвердит оплату, и ты получишь полный доступ.\n\n"
-        "Если нужна помощь, нажми кнопку *Помощь*."
-    )
-    bot.send_message(message.from_user.id, instructions, parse_mode="Markdown")
-
-# Кнопка Оплатил(а)
-@bot.message_handler(func=lambda m: m.text.lower() in ["💳 оплатил(а)", "оплатил", "оплатил(а)"])
+# Обработка оплаты пользователем
+@bot.message_handler(func=lambda m: m.text and m.text.lower() in ["оплатил", "оплатил(а)"])
 def handle_paid(message):
     user_id = message.from_user.id
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    notification = (
-        f"💸 *Поступила заявка на оплату!*\n\n"
-        f"👤 Пользователь: [{user_id}](tg://user?id={user_id})\n"
-        f"🕒 Время: {now}\n"
-        f"💰 Сумма: 99₽"
-    )
-    bot.send_message(ADMIN_GROUP_ID, notification, parse_mode="Markdown")
-    bot.reply_to(message, "⌛ Спасибо! Ожидай подтверждения от администратора.")
-
-# Кнопка Мой статус
-@bot.message_handler(func=lambda m: m.text == "📊 Мой статус")
-def send_status(message):
-    user_id = message.from_user.id
-    user = users.get(user_id)
-    if not user:
-        bot.send_message(user_id, "❌ Ты не активировал бота. Нажми /start для начала.")
-        return
-
+    username = get_username_or_id(message.from_user)
     now = datetime.now()
-    start = user["start_date"]
-    paid = user["paid"]
-
-    if paid:
-        status_text = "✅ У тебя активная подписка. Пользуйся без ограничений!"
-    else:
-        days_left = 7 - (now - start).days
-        if days_left > 0:
-            status_text = f"🆓 Бесплатная неделя активна. Осталось {days_left} день(ей)."
-        else:
-            status_text = "❌ Бесплатный период закончился. Чтобы продолжить — оформи подписку."
-
-    bot.send_message(user_id, status_text)
-
-# Кнопка Помощь
-@bot.message_handler(func=lambda m: m.text == "❓ Помощь")
-def send_help(message):
-    help_text = (
-        "🆘 *Помощь*\n\n"
-        "Если у тебя возникли вопросы или проблемы, напиши сюда:\n"
-        "📧 support@example.com\n\n"
-        "Или попробуй команду /start для перезапуска бота."
+    msg = (
+        f"💸 *Поступила заявка на оплату!*\n\n"
+        f"Пользователь: {username}\n"
+        f"ID: {user_id}\n"
+        f"Время: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"{PAYMENT_REQUISITES}"
     )
-    bot.send_message(message.from_user.id, help_text, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "⌛ Ожидай подтверждения от админа.")
+    bot.send_message(ADMIN_GROUP_ID, msg, parse_mode='Markdown', reply_markup=admin_confirm_button(user_id))
 
-# Команда для админа подтверждения оплаты
-@bot.message_handler(commands=['confirm'])
-def confirm_payment(message):
-    if message.chat.id != ADMIN_GROUP_ID:
+# Обработка нажатия кнопки подтверждения оплаты в админ-группе
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_"))
+def callback_confirm_payment(call):
+    if call.message.chat.id != ADMIN_GROUP_ID:
+        bot.answer_callback_query(call.id, "Это действие доступно только админам.")
         return
-    try:
-        user_id = int(message.text.split()[1])
-        if user_id in users:
-            users[user_id]["paid"] = True
-            bot.send_message(user_id, "🎉 Ваша подписка подтверждена! Бот полностью активирован.")
-            bot.send_message(ADMIN_GROUP_ID, f"🔓 Пользователь {user_id} активирован.")
-        else:
-            bot.send_message(ADMIN_GROUP_ID, "❌ Пользователь с таким ID не найден.")
-    except (IndexError, ValueError):
-        bot.send_message(ADMIN_GROUP_ID, "⚠️ Укажи ID пользователя после команды /confirm, например:\n/confirm 123456789")
 
-# Проверка доступа пользователя (в коде пока не используется, но будет нужна)
+    user_id_str = call.data.split("_")[1]
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        bot.answer_callback_query(call.id, "Некорректный ID пользователя.")
+        return
+
+    if user_id in users:
+        users[user_id]["paid"] = True
+        bot.send_message(user_id, "✅ Ваша подписка активирована! Спасибо за оплату, бот теперь работает без ограничений.")
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"🔓 Оплата подтверждена пользователем с ID: {user_id}. Подписка активирована.",
+            parse_mode='Markdown'
+        )
+        bot.answer_callback_query(call.id, "Подписка активирована!")
+    else:
+        bot.answer_callback_query(call.id, "Пользователь не найден.")
+
+# Проверка доступа пользователя
 def has_access(user_id):
     user = users.get(user_id)
     if not user:
@@ -131,6 +104,7 @@ def has_access(user_id):
         return True
     return (datetime.now() - user["start_date"]) < timedelta(days=7)
 
-# Запуск бота
-print("🤖 Бот запущен и готов к работе!")
-bot.polling(none_stop=True)
+# Здесь будет логика для сохранения удалённых сообщений (пока заглушка)
+# ...
+
+bot.infinity_polling()
