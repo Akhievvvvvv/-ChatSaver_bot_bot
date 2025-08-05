@@ -1,111 +1,132 @@
-import telebot
-from telebot import types
+import logging
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils import executor
+from aiogram.dispatcher.filters import CommandStart
 from datetime import datetime, timedelta
+import asyncio
 
-TOKEN = "7996519892:AAGl1jJS5pbOmJCBiJDiyYmhWqEmRn6ixmM"
-ADMIN_GROUP_ID = -1002593269045
+from config import TOKEN, ADMIN_GROUP_ID
 
-bot = telebot.TeleBot(TOKEN)
-users = {}
+logging.basicConfig(level=logging.INFO)
 
-def has_access(user_id):
-    user = users.get(user_id)
-    if not user:
-        return False
-    if user["paid"]:
-        return True
-    return (datetime.now() - user["start_date"]) < timedelta(days=7)
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
 
-@bot.message_handler(commands=['start'])
-def cmd_start(message):
+user_data = {}  # user_id: {"start_date": datetime, "paid": bool}
+
+
+# 👋 Приветствие
+@dp.message_handler(CommandStart())
+async def start(message: types.Message):
     user_id = message.from_user.id
-    username = message.from_user.username
+    username = message.from_user.username or f"ID {user_id}"
+
+    if user_id not in user_data:
+        user_data[user_id] = {
+            "start_date": datetime.now(),
+            "paid": False
+        }
+
+    text = (
+        f"👋 Привет, @{username}!\n\n"
+        f"Добро пожаловать в <b>ChatSaver Bot</b> — твой помощник для сохранения удалённых сообщений, "
+        f"самоудаляющихся медиа и всего чата.\n\n"
+        f"🚀 <b>Что бот умеет?</b>\n"
+        f"• Сохраняет удалённые сообщения 📥\n"
+        f"• Сохраняет самоудаляющиеся фото, видео и голосовые 📸\n"
+        f"• Сохраняет чат, даже если он удалён у всех 🗑️\n\n"
+        f"🆓 Тебе доступна бесплатная неделя использования!\n\n"
+        f"Нажми кнопку ниже, чтобы активировать бота и получить инструкцию 👇"
+    )
+
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("⚙️ Активировать бота", callback_data="activate")
+    )
+
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# 📌 Инструкция
+@dp.callback_query_handler(lambda c: c.data == "activate")
+async def show_instruction(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    text = (
+        "📌 <b>Как активировать ChatSaver Bot:</b>\n\n"
+        "1️⃣ Добавь бота в нужный чат и разреши читать сообщения.\n"
+        "2️⃣ Он автоматически сохранит удалённые сообщения и медиа.\n"
+        "3️⃣ После 7 дней использования, если кто-то что-то удалит — "
+        "тебе придёт сообщение с кнопкой 👀 <b>Посмотреть</b>.\n"
+        "4️⃣ После нажатия ты увидишь реквизиты для оплаты:\n"
+        "💳 +7 932 222 99 30\n🏦 Ozon Bank\n💰 99₽/мес\n"
+        "5️⃣ Отправь сообщение <b>Оплатил(а)</b> — и админ подтвердит активацию.\n\n"
+        "🎉 Всё просто и удобно!"
+    )
+    await callback_query.message.answer(text, parse_mode="HTML")
+
+
+# ⛔ Удалённое сообщение при окончании пробного периода
+@dp.message_handler(content_types=types.ContentType.ANY)
+async def handle_deleted_message(message: types.Message):
+    user_id = message.from_user.id
+    data = user_data.get(user_id)
+
+    if not data:
+        return
+
     now = datetime.now()
+    start = data["start_date"]
+    paid = data["paid"]
 
-    if user_id not in users:
-        users[user_id] = {"start_date": now, "paid": False}
+    if not paid and now > start + timedelta(days=7):
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton("👀 Посмотреть", callback_data="pay_info")
+        )
+        await message.answer(
+            "❗ Кто-то удалил сообщение, но оно скрыто.\n"
+            "Для просмотра нужно продлить доступ.",
+            reply_markup=keyboard
+        )
 
-    name = f"@{username}" if username else f"ID: {user_id}"
-    text = f"""👋 Привет, {name}!
 
-Добро пожаловать в *ChatSaver Bot* — твой надёжный помощник для сохранения:
-📥 Удалённых сообщений  
-📸 Самоудаляющихся медиа  
-🗑️ Чатов, даже если они удалены у всех
+# 💳 Показать реквизиты
+@dp.callback_query_handler(lambda c: c.data == "pay_info")
+async def show_payment_info(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    text = (
+        "💳 <b>Оплата подписки</b>\n\n"
+        "+7 932 222 99 30\n"
+        "🏦 Ozon Bank\n"
+        "💰 99₽ / мес\n\n"
+        "После оплаты отправь сообщение: <b>Оплатил(а)</b>."
+    )
+    await callback_query.message.answer(text, parse_mode="HTML")
 
-🆓 У тебя есть *бесплатная неделя* использования!  
-После 7 дней потребуется подписка — *99₽ в месяц*.
 
-Нажми на кнопку ниже, чтобы увидеть инструкцию по активации:
-"""
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("⚙️ Активировать бота", callback_data="show_instructions"))
-    bot.send_message(user_id, text, parse_mode='Markdown', reply_markup=kb)
+# ✅ Подтверждение оплаты
+@dp.message_handler(lambda m: m.text.lower() == "оплатил" or m.text.lower() == "оплатил(а)")
+async def confirm_payment(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or f"ID {user_id}"
+    text = f"💰 Пользователь {username} отправил сообщение об оплате.\n\n✅ Подтвердить активацию?"
 
-@bot.callback_query_handler(lambda c: c.data == "show_instructions")
-def show_instructions(call):
-    instructions = """📌 *Как активировать ChatSaver Bot:*
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"approve_{user_id}")
+    )
 
-1️⃣ Добавь бота в нужный чат и разреши читать сообщения.  
-2️⃣ Он автоматически сохранит удалённые сообщения и медиа.  
-3️⃣ Если удалишь сообщение после окончания бесплатного периода — придёт уведомление с кнопкой 👀 _Посмотреть_.  
-4️⃣ После нажатия на неё ты увидишь мои реквизиты:  
-💳 +7 932 222 99 30 (Ozon Bank), 99₽/мес  
-5️⃣ Отправь текст *Оплатил(а)*, и админ активирует тебе доступ.
+    await bot.send_message(chat_id=ADMIN_GROUP_ID, text=text, reply_markup=keyboard)
 
-🛠 Всё просто, интуитивно и удобно!"""
-    bot.send_message(call.from_user.id, instructions, parse_mode='Markdown')
 
-@bot.message_handler(lambda m: not has_access(m.from_user.id))
-def blocked_handler(message):
-    text = "❗ Бесплатный период закончился, доступ заблокирован.\n\n"
-    bot.send_message(message.from_user.id, text)
+# 🔓 Активация подписки админом
+@dp.callback_query_handler(lambda c: c.data.startswith("approve_"))
+async def approve_payment(callback_query: types.CallbackQuery):
+    user_id = int(callback_query.data.split("_")[1])
+    user_data[user_id]["paid"] = True
 
-@bot.message_handler(lambda m: has_access(m.from_user.id) and m.text and "deleted_test:" in m.text)
-def simulate_deleted(message):
-    # эмуляция: если пришло "deleted_test: <текст>" — показываем уведомление
-    deleted_text = message.text.split("deleted_test:",1)[1].strip()
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("👀 Посмотреть", callback_data="view_payment"))
-    bot.send_message(message.from_user.id,
-                     f"⚠️ Кто-то удалил сообщение:\n{deleted_text}\n" +
-                     "Сообщение сохранено, но скрыто.",
-                     reply_markup=kb)
+    await bot.send_message(user_id, "✅ Доступ к боту успешно активирован! Спасибо за оплату. 🤝")
+    await callback_query.answer("Подтверждено ✅")
 
-@bot.callback_query_handler(lambda c: c.data == "view_payment")
-def show_payment(call):
-    payment_info = """💳 *Реквизиты для оплаты:*
 
-+7 932 222 99 30  
-Ozon Bank  
-Сумма: 99₽ в месяц
-
-После оплаты отправь сообщение _Оплатил(а)_ — и админ активирует подписку."""
-    bot.send_message(call.from_user.id, payment_info, parse_mode='Markdown')
-
-@bot.message_handler(lambda m: m.text and m.text.lower() in ["оплатил", "оплатил(а)"])
-def handle_paid(message):
-    uid = message.from_user.id
-    username = message.from_user.username or str(uid)
-    now = datetime.now().strftime("%Y‑%m‑%d %H:%M:%S")
-    users.setdefault(uid, {"start_date": now, "paid": False})
-    msg = (f"💸 *Пользователь сообщил об оплате!*\n\n"
-           f"👤 @{username}\n"
-           f"🆔 {uid}\n"
-           f"🕒 {now}\n"
-           f"Сумма: 99₽")
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_{uid}"))
-    bot.send_message(ADMIN_GROUP_ID, msg, parse_mode='Markdown', reply_markup=kb)
-    bot.send_message(uid, "⌛ Спасибо! Ждём подтверждения от администратора.")
-
-@bot.callback_query_handler(lambda c: c.data.startswith("confirm_"))
-def confirm_call(call):
-    uid = int(call.data.split("_")[1])
-    users[uid]["paid"] = True
-    bot.send_message(uid, "✅ Подписка активирована! Бот работает без ограничений 🎉")
-    bot.send_message(ADMIN_GROUP_ID, f"🔓 Подписка для {uid} активирована.")
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-
-print("🤖 Bot is running...")
-bot.infinity_polling()
+if __name__ == "__main__":
+    from aiogram import executor
+    executor.start_polling(dp, skip_updates=True)
